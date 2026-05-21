@@ -36,9 +36,42 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A SafeObjectInputStream reads data that was written by SafeObjectOutputStream
- * 
- * @see SafeObjectInput
+ * A SafeObjectInputStream reads data that was written by SafeObjectOutputStream.
+ *
+ * <h3>Deserialization Security (SECURE BY DEFAULT)</h3>
+ * <p>This class applies JEP 290-based deserialization filtering via {@link ClassNameFilter}
+ * by default. Only IBM WebSphere allowed classes and standard Java types are allowed for deserialization,
+ * providing defense-in-depth protection against deserialization attacks.</p>
+ *
+ * <p><b>Default Behavior:</b> All SafeObjectInputStream instances automatically apply the
+ * IBM WebSphere allowed list (15 classes via IbmClassNameFilter).
+ * This is a breaking change from previous versions where no filtering was applied.</p>
+ *
+ * <h3>Filter Application</h3>
+ * <p>The ClassNameFilter is applied at two points:</p>
+ * <ul>
+ *   <li>To the original ObjectInput (if it's an ObjectInputStream) in the install() method</li>
+ *   <li>To ObjectInputStreamWithCL instances created in createObjectInputStream()</li>
+ * </ul>
+ *
+ * <p><b>Important:</b> SafeObjectInputStream implements ObjectInput, not ObjectInputStream.
+ * The filter can only be applied to actual ObjectInputStream instances.</p>
+ *
+ * <h3>Usage Examples</h3>
+ * <pre>
+ * // Example 1: Use default IBM WebSphere allowed list (automatic)
+ * SafeObjectInputStream safe = SafeObjectInputStream.install(in);
+ *
+ * // Example 2: Use IBM WebSphere filter
+ * ClassNameFilter filter = new IbmClassNameFilter();
+ * SafeObjectInputStream safe = SafeObjectInputStream.install(in, filter);
+ *
+ * // Example 3: Disable filtering (not recommended)
+ * SafeObjectInputStream safe = SafeObjectInputStream.install(in, null);
+ * </pre>
+ *
+ * @see SafeObjectOutput
+ * @see ClassNameFilter
  */
 public class SafeObjectInputStream implements ObjectInput, ObjectStreamConstants {
 
@@ -53,16 +86,88 @@ public class SafeObjectInputStream implements ObjectInput, ObjectStreamConstants
     private byte[] buffer = null;
     private static final int BUFFER_MIN_SIZE = 4096;
     
+    // Default filter instance (shared across all SafeObjectInputStream instances)
+    private static final ClassNameFilter DEFAULT_FILTER = new IbmClassNameFilter();
+    
+    // ClassNameFilter for deserialization security (secure by default)
+    private ClassNameFilter classNameFilter = DEFAULT_FILTER;
+    
     /**
-     * Add the SafeObjectInputStream if necessary
-     * @param in
-     * @return
+     * Add the SafeObjectInputStream if necessary.
+     * Applies default IBM WebSphere allowed list filter automatically.
+     *
+     * @param in the ObjectInput to wrap
+     * @return SafeObjectInputStream wrapping the input with default filter
      */
     public static SafeObjectInputStream install(ObjectInput in) {
         if (in instanceof SafeObjectInputStream) {
             return (SafeObjectInputStream) in;
         }
+        
+        // Apply default filter to the original ObjectInput if it's an ObjectInputStream
+        ClassNameFilter defaultFilter = DEFAULT_FILTER;
+        
+        if (in instanceof ObjectInputStream) {
+            try {
+                defaultFilter.applyTo((ObjectInputStream) in);
+                if (isDebug) {
+                    log.debug("Applied default ClassNameFilter to ObjectInputStream: " + defaultFilter);
+                }
+            } catch (IOException e) {
+                log.warn("Failed to apply default ClassNameFilter to ObjectInputStream", e);
+            }
+        }
+        
         return new SafeObjectInputStream(in);
+    }
+    
+    /**
+     * Add the SafeObjectInputStream with ClassNameFilter if necessary.
+     *
+     * <p>If the input is an ObjectInputStream, the filter will be applied to it
+     * before wrapping. The filter will also be applied to any ObjectInputStream
+     * instances created internally by SafeObjectInputStream.</p>
+     *
+     * @param in the ObjectInput to wrap
+     * @param filter the ClassNameFilter for deserialization filtering, or null to disable
+     * @return SafeObjectInputStream wrapping the input
+     */
+    public static SafeObjectInputStream install(ObjectInput in, ClassNameFilter filter) {
+        // If already wrapped, update filter and return
+        if (in instanceof SafeObjectInputStream) {
+            SafeObjectInputStream safe = (SafeObjectInputStream) in;
+            safe.setClassNameFilter(filter);
+            return safe;
+        }
+        
+        // Apply filter to the original ObjectInput if it's an ObjectInputStream
+        if (filter != null && in instanceof ObjectInputStream) {
+            try {
+                filter.applyTo((ObjectInputStream) in);
+                if (isDebug) {
+                    log.debug("Applied ClassNameFilter to ObjectInputStream: " + filter);
+                }
+            } catch (IOException e) {
+                log.warn("Failed to apply ClassNameFilter to ObjectInputStream", e);
+            }
+        }
+        
+        // Create wrapper and store filter reference
+        SafeObjectInputStream safe = new SafeObjectInputStream(in);
+        safe.setClassNameFilter(filter);
+        return safe;
+    }
+    
+    /**
+     * Add the SafeObjectInputStream with default IBM WebSphere allowed list filter if necessary.
+     *
+     * @param in the ObjectInput to wrap
+     * @param useDefaultFilter if true, applies default IBM WebSphere allowed list
+     * @return SafeObjectInputStream wrapping the input
+     */
+    public static SafeObjectInputStream installWithDefaultFilter(ObjectInput in, boolean useDefaultFilter) {
+        ClassNameFilter filter = useDefaultFilter ? DEFAULT_FILTER : null;
+        return install(in, filter);
     }
     
     
@@ -347,7 +452,7 @@ public class SafeObjectInputStream implements ObjectInput, ObjectStreamConstants
         if (isDebug) {
             log.debug("Read object=" + valueName(obj));
         }
-        return obj;   
+        return obj;
         
     }
     
@@ -390,8 +495,53 @@ public class SafeObjectInputStream implements ObjectInput, ObjectStreamConstants
     }
     
     private ObjectInputStream createObjectInputStream(InputStream is) throws IOException {
-        // The created ObjectInputStream must use the same class/object resolution 
+        // The created ObjectInputStream must use the same class/object resolution
         // code that is used by the original ObjectInput
-        return new ObjectInputStreamWithCL(is);
+        ObjectInputStreamWithCL ois = new ObjectInputStreamWithCL(is);
+        
+        // Apply ClassNameFilter if configured
+        if (classNameFilter != null) {
+            try {
+                // Apply filter to the stream (for post-loading checks)
+                classNameFilter.applyTo(ois);
+                
+                // ALSO set the filter on ObjectInputStreamWithCL for pre-loading checks
+                // This prevents malicious classes from executing static initializers
+                ois.setClassNameFilter(classNameFilter);
+                
+                if (isDebug) {
+                    log.debug("Applied ClassNameFilter to ObjectInputStreamWithCL: " + classNameFilter);
+                }
+            } catch (IOException e) {
+                log.warn("Failed to apply ClassNameFilter to ObjectInputStreamWithCL", e);
+                // Continue without filtering rather than failing
+            }
+        }
+        
+        return ois;
     }
+    
+    /**
+     * Gets the current ClassNameFilter used for deserialization filtering.
+     *
+     * @return the ClassNameFilter, or null if filtering is disabled
+     */
+    public ClassNameFilter getClassNameFilter() {
+        return classNameFilter;
+    }
+    
+    /**
+     * Sets the ClassNameFilter for deserialization filtering.
+     * When set, only classes allowed by the filter can be deserialized.
+     *
+     * <p>Note: This only affects future ObjectInputStream instances created
+     * by createObjectInputStream(). It does not retroactively apply to the
+     * original ObjectInput passed to the constructor.</p>
+     *
+     * @param filter the ClassNameFilter to use, or null to disable filtering
+     */
+    public void setClassNameFilter(ClassNameFilter filter) {
+        this.classNameFilter = filter;
+    }
+    
 }

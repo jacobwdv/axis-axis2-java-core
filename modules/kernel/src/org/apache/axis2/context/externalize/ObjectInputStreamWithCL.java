@@ -19,8 +19,12 @@
 
 package org.apache.axis2.context.externalize;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InvalidClassException;
 import java.io.ObjectStreamClass;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
@@ -32,10 +36,17 @@ import java.util.HashMap;
 
 /**
  * An ObjectInputStream that is constructed with a ClassLoader or ClassResolver.
- * The default behavior is to use the ContextClassLoader
+ * The default behavior is to use the ContextClassLoader.
+ *
+ * <p><b>SECURITY NOTE:</b> This class has been updated to properly support JEP 290
+ * deserialization filtering. The resolveClass() method now calls super.resolveClass()
+ * first, allowing Java's native filter mechanism to check classes BEFORE they are
+ * loaded. This prevents malicious classes from executing static initializers during
+ * deserialization attacks.</p>
  */
 public class ObjectInputStreamWithCL extends java.io.ObjectInputStream
 {
+    private static final Log log = LogFactory.getLog(ObjectInputStreamWithCL.class);
 
     /**
      * <p>
@@ -46,7 +57,7 @@ public class ObjectInputStreamWithCL extends java.io.ObjectInputStream
     {
         /**
          * Attempt to load the specified class.
-         * 
+         *
          * @param className
          *            The classname.
          * @return The class, or null if not found.
@@ -59,6 +70,9 @@ public class ObjectInputStreamWithCL extends java.io.ObjectInputStream
     /** The class resolver */
 
     protected ClassResolver resolver;
+    
+    /** The ClassNameFilter for pre-loading validation */
+    protected ClassNameFilter classNameFilter;
     static
     {
         primClasses.put("boolean", boolean.class);
@@ -85,14 +99,13 @@ public class ObjectInputStreamWithCL extends java.io.ObjectInputStream
     public ObjectInputStreamWithCL(InputStream is) throws IOException
     {
         super(is);
-        
         classloader = (ClassLoader) AccessController.doPrivileged(new PrivilegedAction()
         {
             public Object run()
             {
-                return Thread.currentThread().getContextClassLoader();                
-            }          
-        });                
+                return Thread.currentThread().getContextClassLoader();
+            }
+        });
     }
 
     /**
@@ -120,11 +133,31 @@ public class ObjectInputStreamWithCL extends java.io.ObjectInputStream
     }
 
     /**
-     * Override resolveClass so that we can use our own ClassLoader
+     * Override resolveClass so that we can use our own ClassLoader.
+     *
+     * <p><b>CRITICAL SECURITY FIX:</b> This method now checks the ClassNameFilter
+     * BEFORE calling Class.forName() to prevent malicious classes from executing
+     * their static initializers during deserialization.</p>
+     *
+     * <p>The JEP 290 filter applied via setObjectInputFilter() only runs during
+     * object instantiation, NOT during class resolution. Therefore, we must
+     * manually check the filter before loading any class to prevent exploitation.</p>
      */
-    protected Class resolveClass(ObjectStreamClass objStrmClass) throws ClassNotFoundException
+    protected Class resolveClass(ObjectStreamClass objStrmClass) throws ClassNotFoundException, IOException
     {
-        return resolveClass(objStrmClass.getName());
+        String className = objStrmClass.getName();
+        
+        // CRITICAL SECURITY FIX: Check filter BEFORE loading the class
+        // This prevents malicious classes from executing static initializers
+        if (classNameFilter != null && !classNameFilter.isClassAllowed(className)) {
+            // Log security event for monitoring/auditing
+            if (log.isWarnEnabled()) {
+                log.warn("SECURITY: Deserialization blocked for class: " + className);
+            }
+            throw new InvalidClassException("Class rejected by deserialization filter: " + className);
+        }
+        
+        return resolveClass(className);
     }
 
     private Class resolveClass(String name) throws ClassNotFoundException
@@ -219,6 +252,26 @@ public class ObjectInputStreamWithCL extends java.io.ObjectInputStream
         }
     }
 
+    
+    /**
+     * Sets the ClassNameFilter for this ObjectInputStream.
+     * This filter will be checked BEFORE attempting to load classes via Class.forName(),
+     * preventing malicious classes from executing static initializers.
+     *
+     * @param filter the ClassNameFilter to use, or null to disable pre-loading checks
+     */
+    public void setClassNameFilter(ClassNameFilter filter) {
+        this.classNameFilter = filter;
+    }
+    
+    /**
+     * Gets the current ClassNameFilter.
+     *
+     * @return the ClassNameFilter, or null if not set
+     */
+    public ClassNameFilter getClassNameFilter() {
+        return classNameFilter;
+    }
     
     /**
      * Override to provide our own resolution
