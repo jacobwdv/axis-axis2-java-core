@@ -17,7 +17,9 @@
  * under the License.
  */
 
-package org.apache.axis2.context.externalize;
+package org.apache.axis2.context.externalize.ibm;
+
+import org.apache.axis2.context.externalize.ClassNameFilter;
 
 /**
  * IBM WebSphere implementation of ClassNameFilter.
