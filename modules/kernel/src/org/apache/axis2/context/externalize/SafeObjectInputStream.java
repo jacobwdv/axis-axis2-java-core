@@ -100,25 +100,7 @@ public class SafeObjectInputStream implements ObjectInput, ObjectStreamConstants
      * @return SafeObjectInputStream wrapping the input with default filter
      */
     public static SafeObjectInputStream install(ObjectInput in) {
-        if (in instanceof SafeObjectInputStream) {
-            return (SafeObjectInputStream) in;
-        }
-        
-        // Apply default filter to the original ObjectInput if it's an ObjectInputStream
-        ClassNameFilter defaultFilter = DEFAULT_FILTER;
-        
-        if (in instanceof ObjectInputStream) {
-            try {
-                defaultFilter.applyTo((ObjectInputStream) in);
-                if (isDebug) {
-                    log.debug("Applied default ClassNameFilter to ObjectInputStream: " + defaultFilter);
-                }
-            } catch (IOException e) {
-                log.warn("Failed to apply default ClassNameFilter to ObjectInputStream", e);
-            }
-        }
-        
-        return new SafeObjectInputStream(in);
+        return install(in, DEFAULT_FILTER);
     }
     
     /**
@@ -156,18 +138,6 @@ public class SafeObjectInputStream implements ObjectInput, ObjectStreamConstants
         SafeObjectInputStream safe = new SafeObjectInputStream(in);
         safe.setClassNameFilter(filter);
         return safe;
-    }
-    
-    /**
-     * Add the SafeObjectInputStream with default IBM WebSphere allowed list filter if necessary.
-     *
-     * @param in the ObjectInput to wrap
-     * @param useDefaultFilter if true, applies default IBM WebSphere allowed list
-     * @return SafeObjectInputStream wrapping the input
-     */
-    public static SafeObjectInputStream installWithDefaultFilter(ObjectInput in, boolean useDefaultFilter) {
-        ClassNameFilter filter = useDefaultFilter ? DEFAULT_FILTER : null;
-        return install(in, filter);
     }
     
     
