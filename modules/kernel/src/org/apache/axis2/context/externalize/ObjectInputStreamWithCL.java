@@ -19,6 +19,7 @@
 
 package org.apache.axis2.context.externalize;
 
+import org.apache.axis2.util.ClassNameFilter;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 

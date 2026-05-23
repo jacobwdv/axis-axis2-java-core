@@ -28,7 +28,7 @@ import org.apache.axis2.description.AxisOperation;
 import org.apache.axis2.description.AxisService;
 import org.apache.axis2.description.AxisServiceGroup;
 import org.apache.axis2.engine.AxisConfiguration;
-import org.apache.axis2.kernel.TransportListener;
+import org.apache.axis2.transport.TransportListener;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
@@ -54,7 +54,7 @@ public class ObjectStateUtils implements ExternalizeConstants {
     // typically used in key-value pairs where a non-null key refers to a null
     // value
     public static String NULL_OBJECT = "NULL_OBJ";
-
+    
     // message/trace/logging strings
     public static final String UNSUPPORTED_SUID = "Serialization version ID is not supported.";
 
@@ -80,8 +80,8 @@ public class ObjectStateUtils implements ExternalizeConstants {
 
     /**
      * Read a string from the specified input stream. Returns null if no string is available.
-     * 
-     * @param i The input stream
+     *
+     * @param i The input stream,filter
      * @param desc A text description to use for logging
      * @return The string or null, if not available
      * @throws IOException
@@ -89,7 +89,22 @@ public class ObjectStateUtils implements ExternalizeConstants {
      */
     public static String readString(ObjectInput i, String desc) throws IOException,
                                                                ClassNotFoundException {
-        SafeObjectInputStream in = SafeObjectInputStream.install(i);
+        return readString(i, desc, null);
+    }
+
+    /**
+     * Read a string from the specified input stream. Returns null if no string is available.
+     *
+     * @param i The input stream
+     * @param desc A text description to use for logging
+     * @param filter The ClassNameFilter to use for deserialization filtering, or null to disable filtering
+     * @return The string or null, if not available
+     * @throws IOException
+     * @throws ClassNotFoundException
+     */
+    public static String readString(ObjectInput i, String desc, ClassNameFilter filter) throws IOException,
+                                                               ClassNotFoundException {
+        SafeObjectInputStream in = SafeObjectInputStream.install(i, filter);
 
         // Get the marker
         in.readUTF();
@@ -114,7 +129,7 @@ public class ObjectStateUtils implements ExternalizeConstants {
 
     /**
      * Read an object from the specified input stream. Returns null if no object is available.
-     * 
+     *
      * @param i The input stream
      * @param desc A text description to use for logging
      * @return The object or null, if not available
@@ -123,7 +138,22 @@ public class ObjectStateUtils implements ExternalizeConstants {
      */
     public static Object readObject(ObjectInput i, String desc) throws IOException,
                                                                ClassNotFoundException {
-        SafeObjectInputStream in = SafeObjectInputStream.install(i);
+        return readObject(i, desc, null);
+    }
+
+    /**
+     * Read an object from the specified input stream. Returns null if no object is available.
+     *
+     * @param i The input stream
+     * @param desc A text description to use for logging
+     * @param filter The ClassNameFilter to use for deserialization filtering, or null to disable filtering
+     * @return The object or null, if not available
+     * @throws IOException
+     * @throws ClassNotFoundException
+     */
+    public static Object readObject(ObjectInput i, String desc, ClassNameFilter filter) throws IOException,
+                                                               ClassNotFoundException {
+        SafeObjectInputStream in = SafeObjectInputStream.install(i, filter);
         in.readUTF(); // Read Marker
         return in.readObject();
     }
@@ -148,7 +178,7 @@ public class ObjectStateUtils implements ExternalizeConstants {
      * Reads an array of objects from the specified input stream. Returns null if no array is
      * available. NOTE: each object in the array should implement either java.io.Serializable or
      * java.io.Externalizable in order to be saved
-     * 
+     *
      * @param i The input stream
      * @param desc A text description to use for logging
      * @return The ArrayList or null, if not available
@@ -156,7 +186,23 @@ public class ObjectStateUtils implements ExternalizeConstants {
      * @throws ClassNotFoundException
      */
     public static ArrayList readArrayList(ObjectInput i, String desc) throws IOException {
-        SafeObjectInputStream in = SafeObjectInputStream.install(i);
+        return readArrayList(i, desc, null);
+    }
+
+    /**
+     * Reads an array of objects from the specified input stream. Returns null if no array is
+     * available. NOTE: each object in the array should implement either java.io.Serializable or
+     * java.io.Externalizable in order to be saved
+     *
+     * @param i The input stream
+     * @param desc A text description to use for logging
+     * @param filter The ClassNameFilter to use for deserialization filtering, or null to disable filtering
+     * @return The ArrayList or null, if not available
+     * @throws IOException
+     * @throws ClassNotFoundException
+     */
+    public static ArrayList readArrayList(ObjectInput i, String desc, ClassNameFilter filter) throws IOException {
+        SafeObjectInputStream in = SafeObjectInputStream.install(i, filter);
         in.readUTF();
         return in.readArrayList();
     }
@@ -179,7 +225,7 @@ public class ObjectStateUtils implements ExternalizeConstants {
     /**
      * Read a hashmap of objects from the specified input stream. Returns null if no hashmap is
      * available.
-     * 
+     *
      * @param in The input stream
      * @param desc A text description to use for logging
      * @return The HashMap or null, if not available
@@ -187,7 +233,22 @@ public class ObjectStateUtils implements ExternalizeConstants {
      * @throws ClassNotFoundException
      */
     public static HashMap readHashMap(ObjectInput i, String desc) throws IOException {
-        SafeObjectInputStream in = SafeObjectInputStream.install(i);
+        return readHashMap(i, desc, null);
+    }
+
+    /**
+     * Read a hashmap of objects from the specified input stream. Returns null if no hashmap is
+     * available.
+     *
+     * @param in The input stream
+     * @param desc A text description to use for logging
+     * @param filter The ClassNameFilter to use for deserialization filtering, or null to disable filtering
+     * @return The HashMap or null, if not available
+     * @throws IOException
+     * @throws ClassNotFoundException
+     */
+    public static HashMap readHashMap(ObjectInput i, String desc, ClassNameFilter filter) throws IOException {
+        SafeObjectInputStream in = SafeObjectInputStream.install(i, filter);
         in.readUTF();
         return in.readHashMap();
     }
@@ -213,7 +274,7 @@ public class ObjectStateUtils implements ExternalizeConstants {
     /**
      * Reads a linked list of objects from the specified input stream. Returns null if no array is
      * available.
-     * 
+     *
      * @param in The input stream
      * @param desc A text description to use for logging
      * @return The linked list or null, if not available
@@ -221,7 +282,22 @@ public class ObjectStateUtils implements ExternalizeConstants {
      * @throws ClassNotFoundException
      */
     public static LinkedList readLinkedList(ObjectInput i, String desc) throws IOException {
-        SafeObjectInputStream in = SafeObjectInputStream.install(i);
+        return readLinkedList(i, desc, null);
+    }
+
+    /**
+     * Reads a linked list of objects from the specified input stream. Returns null if no array is
+     * available.
+     *
+     * @param in The input stream
+     * @param desc A text description to use for logging
+     * @param filter The ClassNameFilter to use for deserialization filtering, or null to disable filtering
+     * @return The linked list or null, if not available
+     * @throws IOException
+     * @throws ClassNotFoundException
+     */
+    public static LinkedList readLinkedList(ObjectInput i, String desc, ClassNameFilter filter) throws IOException {
+        SafeObjectInputStream in = SafeObjectInputStream.install(i, filter);
         in.readUTF();
         return in.readLinkedList();
     }

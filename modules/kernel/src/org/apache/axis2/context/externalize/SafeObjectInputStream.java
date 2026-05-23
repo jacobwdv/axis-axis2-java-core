@@ -20,6 +20,7 @@
 package org.apache.axis2.context.externalize;
 
 import org.apache.axis2.AxisFault;
+import org.apache.axis2.util.ClassNameFilter;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
@@ -38,36 +39,27 @@ import java.util.Map;
 /**
  * A SafeObjectInputStream reads data that was written by SafeObjectOutputStream.
  *
- * <h3>Deserialization Security (SECURE BY DEFAULT)</h3>
- * <p>This class applies JEP 290-based deserialization filtering via {@link ClassNameFilter}
- * by default. Only IBM WebSphere allowed classes and standard Java types are allowed for deserialization,
- * providing defense-in-depth protection against deserialization attacks.</p>
- *
- * <p><b>Default Behavior:</b> All SafeObjectInputStream instances automatically apply the
- * IBM WebSphere allowed list (15 classes via IbmClassNameFilter).
- * This is a breaking change from previous versions where no filtering was applied.</p>
+ * <h3>Deserialization Security</h3>
+ * <p>This class supports deserialization filtering via {@link ClassNameFilter}.
+ * By default, no filtering is applied. Users can specify a custom filter through
+ * {@link org.apache.axis2.util.ObjectStateUtils} methods or by calling install() with a filter.</p>
  *
  * <h3>Filter Application</h3>
- * <p>The ClassNameFilter is applied at two points:</p>
- * <ul>
- *   <li>To the original ObjectInput (if it's an ObjectInputStream) in the install() method</li>
- *   <li>To ObjectInputStreamWithCL instances created in createObjectInputStream()</li>
- * </ul>
- *
- * <p><b>Important:</b> SafeObjectInputStream implements ObjectInput, not ObjectInputStream.
- * The filter can only be applied to actual ObjectInputStream instances.</p>
+ * <p>When a ClassNameFilter is provided, it is applied to ObjectInputStreamWithCL instances
+ * created in createObjectInputStream(). The filter performs pre-loading class name validation
+ * before classes are loaded, preventing malicious classes from executing static initializers.</p>
  *
  * <h3>Usage Examples</h3>
  * <pre>
- * // Example 1: Use default IBM WebSphere allowed list (automatic)
+ * // Example 1: No filtering (default behavior)
  * SafeObjectInputStream safe = SafeObjectInputStream.install(in);
  *
- * // Example 2: Use IBM WebSphere filter
- * ClassNameFilter filter = new IbmClassNameFilter();
+ * // Example 2: Use a custom filter
+ * ClassNameFilter filter = new MyCustomFilter();
  * SafeObjectInputStream safe = SafeObjectInputStream.install(in, filter);
  *
- * // Example 3: Disable filtering (not recommended)
- * SafeObjectInputStream safe = SafeObjectInputStream.install(in, null);
+ * // Example 3: Use ObjectStateUtils with a filter
+ * Object obj = ObjectStateUtils.readObject(in, "description", myFilter);
  * </pre>
  *
  * @see SafeObjectOutput
@@ -86,29 +78,25 @@ public class SafeObjectInputStream implements ObjectInput, ObjectStreamConstants
     private byte[] buffer = null;
     private static final int BUFFER_MIN_SIZE = 4096;
     
-    // Default filter instance (shared across all SafeObjectInputStream instances)
-    private static final ClassNameFilter DEFAULT_FILTER = new IbmClassNameFilter();
-    
-    // ClassNameFilter for deserialization security (secure by default)
-    private ClassNameFilter classNameFilter = DEFAULT_FILTER;
+    // ClassNameFilter for deserialization security (null by default - no filtering)
+    private ClassNameFilter classNameFilter = null;
     
     /**
      * Add the SafeObjectInputStream if necessary.
-     * Applies default IBM WebSphere allowed list filter automatically.
+     * No filtering is applied by default.
      *
      * @param in the ObjectInput to wrap
-     * @return SafeObjectInputStream wrapping the input with default filter
+     * @return SafeObjectInputStream wrapping the input with no filter
      */
     public static SafeObjectInputStream install(ObjectInput in) {
-        return install(in, DEFAULT_FILTER);
+        return install(in, null);
     }
     
     /**
      * Add the SafeObjectInputStream with ClassNameFilter if necessary.
      *
-     * <p>If the input is an ObjectInputStream, the filter will be applied to it
-     * before wrapping. The filter will also be applied to any ObjectInputStream
-     * instances created internally by SafeObjectInputStream.</p>
+     * <p>The filter will be applied to any ObjectInputStream instances created
+     * internally by SafeObjectInputStream for pre-loading class name validation.</p>
      *
      * @param in the ObjectInput to wrap
      * @param filter the ClassNameFilter for deserialization filtering, or null to disable
@@ -120,18 +108,6 @@ public class SafeObjectInputStream implements ObjectInput, ObjectStreamConstants
             SafeObjectInputStream safe = (SafeObjectInputStream) in;
             safe.setClassNameFilter(filter);
             return safe;
-        }
-        
-        // Apply filter to the original ObjectInput if it's an ObjectInputStream
-        if (filter != null && in instanceof ObjectInputStream) {
-            try {
-                filter.applyTo((ObjectInputStream) in);
-                if (isDebug) {
-                    log.debug("Applied ClassNameFilter to ObjectInputStream: " + filter);
-                }
-            } catch (IOException e) {
-                log.warn("Failed to apply ClassNameFilter to ObjectInputStream", e);
-            }
         }
         
         // Create wrapper and store filter reference
@@ -469,22 +445,13 @@ public class SafeObjectInputStream implements ObjectInput, ObjectStreamConstants
         // code that is used by the original ObjectInput
         ObjectInputStreamWithCL ois = new ObjectInputStreamWithCL(is);
         
-        // Apply ClassNameFilter if configured
+        // Set the filter on ObjectInputStreamWithCL for pre-loading checks
+        // This prevents malicious classes from executing static initializers
         if (classNameFilter != null) {
-            try {
-                // Apply filter to the stream (for post-loading checks)
-                classNameFilter.applyTo(ois);
-                
-                // ALSO set the filter on ObjectInputStreamWithCL for pre-loading checks
-                // This prevents malicious classes from executing static initializers
-                ois.setClassNameFilter(classNameFilter);
-                
-                if (isDebug) {
-                    log.debug("Applied ClassNameFilter to ObjectInputStreamWithCL: " + classNameFilter);
-                }
-            } catch (IOException e) {
-                log.warn("Failed to apply ClassNameFilter to ObjectInputStreamWithCL", e);
-                // Continue without filtering rather than failing
+            ois.setClassNameFilter(classNameFilter);
+            
+            if (isDebug) {
+                log.debug("Set ClassNameFilter on ObjectInputStreamWithCL: " + classNameFilter);
             }
         }
         
